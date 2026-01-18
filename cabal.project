@@ -1,6 +1,6 @@
 packages: .
 
-with-compiler: ghc-9.6.7
+with-compiler: ghc
 
 -- Always enable tests, so that the relevant dependencies get built etc.
 tests: True

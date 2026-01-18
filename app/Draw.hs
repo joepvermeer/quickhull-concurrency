@@ -10,7 +10,6 @@ import Graphics.Gloss.Interface.IO.Interact                         hiding ( Vec
 import Data.Array.Accelerate                                        ( Vector, toList, fromList, Z(..), (:.)(..) )
 import qualified Data.List                                          as L
 
-
 screenOfPoint
     :: Int
     -> Int
