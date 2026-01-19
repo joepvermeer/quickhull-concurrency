@@ -141,10 +141,91 @@ initialPartition points =
               else Nothing_
 
       newPoints :: Acc (Vector Point)
-      newPoints = error "TODO: place each point into its corresponding segment of the result"
+      newPoints = 
+        let
+          u :: Exp Int
+          u = the countUpper
+
+          l :: Exp Int
+          l = the countLower
+
+          totalLen :: Exp Int
+          totalLen = 3 + u + l
+
+          sh :: Exp DIM1
+          sh = index1 totalLen
+
+          -- base array filled with p1 everywhere
+          base :: Acc (Vector Point)
+          base = generate sh (\_ -> p1)
+
+          -- place all upper points at indices 1 + offsetUpper[i]
+          upperPlaced :: Acc (Vector Point)
+          upperPlaced =
+            permute
+              const
+              base
+              (\ix ->
+                 let Z :. i = unlift ix :: Z :. Exp Int
+                     isU    = isUpper ! index1 i
+                     offU   = offsetUpper ! index1 i
+                 in
+                 if isU
+                   then Just_ (index1 (1 + offU))
+                   else Nothing_)
+              points
+
+          -- place all lower points at indices 2 + u + offsetLower[i]
+          upperAndLower :: Acc (Vector Point)
+          upperAndLower =
+            permute
+              const
+              upperPlaced
+              (\ix ->
+                 let Z :. i = unlift ix :: Z :. Exp Int
+                     isL    = isLower ! index1 i
+                     offL   = offsetLower ! index1 i
+                 in
+                 if isL
+                   then Just_ (index1 (2 + u + offL))
+                   else Nothing_)
+              points
+
+          -- fix the three hull points: p1 at 0 and at end, p2 at 1+u
+        in
+        generate sh $ \ix ->
+          let
+            Z :. i = unlift ix :: Z :. Exp Int
+          in
+          if i == 0 then
+            p1
+          else if i == 1 + u then
+            p2
+          else if i == totalLen - 1 then
+            p1
+          else
+            upperAndLower ! ix
 
       headFlags :: Acc (Vector Bool)
-      headFlags = error "TODO: create head flags array demarcating the initial segments"
+      headFlags = 
+        let
+          u :: Exp Int
+          u = the countUpper
+
+          l :: Exp Int
+          l = the countLower
+
+          totalLen :: Exp Int
+          totalLen = 3 + u + l
+
+          sh :: Exp DIM1
+          sh = index1 totalLen
+        in
+        generate sh $ \ix ->
+          let
+            Z :. i = unlift ix :: Z :. Exp Int
+          in
+          i == 0 || i == 2 + u
   in
   T2 headFlags newPoints
 
