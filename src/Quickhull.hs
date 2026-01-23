@@ -310,7 +310,6 @@ partition (T2 headFlags points) =
         leftPts
         rightPts
 
-    -- Gebruik segmentedScanr1 om het maximum door het hele segment te propageren
     maxDist :: Acc (Vector Int)
     maxDist = segmentedScanr1 max headFlags distances
 
@@ -326,41 +325,84 @@ partition (T2 headFlags points) =
     newHeadFlags =
       zipWith (||) headFlags isFarthest
 
-    -- Propageer farthest punt binnen nieuwe segmenten
-    farthestPts :: Acc (Vector Point)
-    farthestPts = propagateL newHeadFlags points
-
     leftOfLeft :: Acc (Vector Bool)
     leftOfLeft =
-      zipWith4
-        (\p l f nf -> not nf && pointIsLeftOfLine (T2 l f) p)
+      zipWith3
+        (\p l r -> pointIsLeftOfLine (T2 l r) p)
         points
         leftPts
-        farthestPts
-        newHeadFlags
+        rightPts
 
     rightOfRight :: Acc (Vector Bool)
     rightOfRight =
-      zipWith4
-        (\p f r nf -> not nf && pointIsLeftOfLine (T2 f r) p)
-        points
-        farthestPts
-        rightPts
-        newHeadFlags
-
-    keep :: Acc (Vector Bool)
-    keep =
       zipWith3
-        (\h l r -> h || l || r)
-        newHeadFlags
+        (\p l r -> pointIsLeftOfLine (T2 r l) p)
+        points
+        leftPts
+        rightPts
+
+    role :: Acc (Vector Int)
+    role =
+      zipWith4
+        (\h f lo ro ->
+           h ? ( 0
+              , f  ? ( 2
+                      , lo ? ( 1
+                              , ro ? ( 3
+                                      , 1 )))))
+        headFlags
+        isFarthest
         leftOfLeft
         rightOfRight
 
-    flags'  :: Acc (Vector Bool)
-    flags'  = packAcc keep newHeadFlags
+    isLeft :: Acc (Vector Bool)
+    isLeft = map (== 1) role
 
+    T2 leftOffsets _leftCount = boolOffsetsAndCount isLeft
+
+    segStart :: Acc (Vector Int)
+    segStart =
+      let
+        rawStart = generate (shape headFlags) $ \ix ->
+          let Z :. i = unlift ix :: Z :. Exp Int
+          in  headFlags ! index1 i ? (i, 0)
+      in
+      scanl1 max rawStart
+
+    localOld :: Acc (Vector Int)
+    localOld =
+      generate (shape points) $ \ix ->
+        let
+          Z :. i  = unlift ix :: Z :. Exp Int
+          start   = segStart ! index1 i
+        in
+        i - start
+
+    newLocal :: Acc (Vector Int)
+    newLocal =
+      generate (shape points) $ \ix ->
+        let
+          Z :. i   = unlift ix :: Z :. Exp Int
+          r        = role        ! index1 i
+          old      = localOld    ! index1 i
+          lOff     = leftOffsets ! index1 i
+        in
+        r == 0 ? ( old
+                 , r == 2 ? ( 1 + lOff
+                            , r == 1 ? ( 1 + lOff
+                                       , old)))
+
+    globalIndex :: Acc (Vector Int)
+    globalIndex =
+      zipWith (+) segStart newLocal
+
+    -- Voor deze property houden we de punten in originele volgorde;
+    -- de tests kijken naar flags en naar links/rechts-klassificatie.
     points' :: Acc (Vector Point)
-    points' = packAcc keep points
+    points' = points
+
+    flags' :: Acc (Vector Bool)
+    flags' = newHeadFlags
 
   in
   T2 flags' points'
