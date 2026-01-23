@@ -1,0 +1,12 @@
+dist
+dist-newstyle
+dist-newstyle/
+.cabal-sandbox
+.cabal
+*.hi
+*.o
+.haskell-workspace
+.haskell-workspace-backup
+.stack-work
+.cache
+.DS_Store

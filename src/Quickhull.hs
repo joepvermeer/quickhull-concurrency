@@ -140,40 +140,11 @@ initialPartition points =
               then Just_ (index1 dstLower)
               else Nothing_
 
-
-      total :: Exp Int
-      total = 3 + the countUpper + the countLower
-
       newPoints :: Acc (Vector Point)
-      newPoints =
-        let
-          base =
-            generate (index1 total) $ \ix ->
-              let Z :. i = unlift ix :: Z :. Exp Int
-              in  if i == 0
-                    then p1
-                  else if i == 1 + the countUpper
-                    then p2
-                  else if i == 2 + the countUpper + the countLower
-                    then p1
-                  else p1   -- dummy, overwritten by permute
-        in
-        permute
-          (\_ new -> new)
-          base
-          (\ix -> destination ! index1 (unlift ix :: Z :. Exp Int)._2)
-          points
+      newPoints = error "TODO: place each point into its corresponding segment of the result"
 
       headFlags :: Acc (Vector Bool)
-      headFlags =
-        generate (index1 total) $ \ix ->
-          let Z :. i = unlift ix :: Z :. Exp Int
-          in  i == 0
-           || i == 1 + the countUpper
-           || i == 2 + the countUpper + the countLower
-
-
-       
+      headFlags = error "TODO: create head flags array demarcating the initial segments"
   in
   T2 headFlags newPoints
 
@@ -242,80 +213,15 @@ boolOffsetsAndCount flags =
 --
 partition :: Acc SegmentedPoints -> Acc SegmentedPoints
 partition (T2 headFlags points) =
-  let
-    leftPts  = propagateL headFlags points
-    rightPts = propagateR headFlags points
-
-    -- distance from segment line
-    distances =
-      zipWith3
-        (\p l r -> nonNormalizedDistance (T2 l r) p)
-        points
-        leftPts
-        rightPts
-
-    -- maximum per segment
-    maxDist = segmentedScanl1 max headFlags distances
-
-    -- farthest points become new hull points
-    isFarthest =
-      zipWith3
-        (\d m h -> (d == m) && not h)
-        distances
-        maxDist
-        headFlags
-
-    newHeadFlags =
-      zipWith (||) headFlags isFarthest
-
-    -- classify undecided points
-    leftOfLeft =
-      zipWith3
-        (\p l r -> pointIsLeftOfLine (T2 l p) p)
-        points
-        leftPts
-        rightPts
-
-    rightOfRight =
-      zipWith3
-        (\p l r -> pointIsLeftOfLine (T2 p r) p)
-        points
-        leftPts
-        rightPts
-
-    keep =
-      zipWith3
-        (\h a b -> h || a || b)
-        newHeadFlags
-        leftOfLeft
-        rightOfRight
-
-    flags'  = compress keep newHeadFlags
-    points' = compress keep points
-  in
-  T2 flags' points'
+  error "TODO: partition"
 
 
 -- The completed algorithm repeatedly partitions the points until there are
 -- no undecided points remaining. What remains is the convex hull.
 --
 quickhull :: Acc (Vector Point) -> Acc (Vector Point)
-quickhull pts =
-  let
-    initial = initialPartition pts
-
-    done (T2 flags _) =
-      let undecided = map not flags
-          (_, c)    = boolOffsetsAndCount undecided
-      in  unit (the c == 0)
-
-    step = partition
-
-    T2 finalFlags finalPoints =
-      awhile done step initial
-  in
-  compress finalFlags finalPoints
-
+quickhull =
+  error "TODO: quickhull"
 
 
 -- Helper functions
