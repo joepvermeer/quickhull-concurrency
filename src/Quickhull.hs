@@ -291,18 +291,17 @@ boolOffsetsAndCount flags =
 -- p₃. This point is on the convex hull. Then determine whether each point
 -- p in that segment lies to the left of (p₁,p₃) or the right of (p₂,p₃).
 -- These points are undecided.
---
+
+
 partition :: Acc SegmentedPoints -> Acc SegmentedPoints
 partition (T2 headFlags points) =
   let
-    -- 1. Links- en rechtse hulpunten per segment
     leftPts  :: Acc (Vector Point)
     leftPts  = propagateL headFlags points
 
     rightPts :: Acc (Vector Point)
     rightPts = propagateR headFlags points
 
-    -- 2. Afstanden tot lijn (p1,p2) en maximale afstand per segment
     distances :: Acc (Vector Int)
     distances =
       zipWith3
@@ -311,10 +310,10 @@ partition (T2 headFlags points) =
         leftPts
         rightPts
 
+    -- Gebruik segmentedScanr1 om het maximum door het hele segment te propageren
     maxDist :: Acc (Vector Int)
-    maxDist = segmentedScanl1 max headFlags distances
+    maxDist = segmentedScanr1 max headFlags distances
 
-    -- 3. Verste punten per segment (exclusief bestaande hullpunten)
     isFarthest :: Acc (Vector Bool)
     isFarthest =
       zipWith3
@@ -323,91 +322,45 @@ partition (T2 headFlags points) =
         maxDist
         headFlags
 
-    -- 4. Nieuwe hull-flags = oude hullpunten + verste punten
     newHeadFlags :: Acc (Vector Bool)
     newHeadFlags =
       zipWith (||) headFlags isFarthest
 
-    -- 5. Classificatie t.o.v. (p1,p3) en (p3,p2)
+    -- Propageer farthest punt binnen nieuwe segmenten
+    farthestPts :: Acc (Vector Point)
+    farthestPts = propagateL newHeadFlags points
+
     leftOfLeft :: Acc (Vector Bool)
     leftOfLeft =
-      zipWith3
-        (\p l r -> pointIsLeftOfLine (T2 l r) p)
+      zipWith4
+        (\p l f nf -> not nf && pointIsLeftOfLine (T2 l f) p)
         points
         leftPts
-        rightPts
+        farthestPts
+        newHeadFlags
 
     rightOfRight :: Acc (Vector Bool)
     rightOfRight =
-      zipWith3
-        (\p l r -> pointIsLeftOfLine (T2 r l) p)
-        points
-        leftPts
-        rightPts
-
-    -- 6. Rol per punt binnen segment
-    role :: Acc (Vector Int)
-    role =
       zipWith4
-        (\h f lo ro ->
-           h ? ( 0
-              , f  ? ( 2
-                      , lo ? ( 1
-                              , ro ? ( 3
-                                      , 1 )))))
-        headFlags
-        isFarthest
+        (\p f r nf -> not nf && pointIsLeftOfLine (T2 f r) p)
+        points
+        farthestPts
+        rightPts
+        newHeadFlags
+
+    keep :: Acc (Vector Bool)
+    keep =
+      zipWith3
+        (\h l r -> h || l || r)
+        newHeadFlags
         leftOfLeft
         rightOfRight
 
-    -- 7. Offsets voor linker punten
-    isLeft :: Acc (Vector Bool)
-    isLeft = map (== 1) role
+    flags'  :: Acc (Vector Bool)
+    flags'  = packAcc keep newHeadFlags
 
-    T2 leftOffsets _leftCount = boolOffsetsAndCount isLeft
-
-    -- 8. Segment-startindex
-    segStart :: Acc (Vector Int)
-    segStart =
-      let
-        rawStart = generate (shape headFlags) $ \ix ->
-          let Z :. i = unlift ix :: Z :. Exp Int
-          in  headFlags ! index1 i ? (i, 0)
-      in
-      scanl1 max rawStart
-
-    -- 9. Oude lokale index binnen segment
-    localOld :: Acc (Vector Int)
-    localOld =
-      generate (shape points) $ \ix ->
-        let
-          Z :. i  = unlift ix :: Z :. Exp Int
-          start   = segStart ! index1 i
-        in
-        i - start
-
-    -- 10. Nieuwe lokale index binnen segment
-    newLocal :: Acc (Vector Int)
-    newLocal =
-      generate (shape points) $ \ix ->
-        let
-          Z :. i   = unlift ix :: Z :. Exp Int
-          r        = role        ! index1 i
-          old      = localOld    ! index1 i
-          lOff     = leftOffsets ! index1 i
-        in
-        r == 0 ? ( old
-                 , r == 2 ? ( 1 + lOff
-                            , r == 1 ? ( 1 + lOff
-                                       , old)))
-
-    -- 11. We gebruiken globalIndex voorlopig niet om te permuten
-    --     (herordening komt later / in quickhull)
     points' :: Acc (Vector Point)
-    points' = points
-
-    flags' :: Acc (Vector Bool)
-    flags' = newHeadFlags
+    points' = packAcc keep points
 
   in
   T2 flags' points'
