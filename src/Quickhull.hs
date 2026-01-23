@@ -294,8 +294,113 @@ boolOffsetsAndCount flags =
 --
 partition :: Acc SegmentedPoints -> Acc SegmentedPoints
 partition (T2 headFlags points) =
-  error "TODO: partition"
+  let
+    -- linker en rechter hulpunten per segment
+    leftPts  :: Acc (Vector Point)
+    leftPts  = propagateL headFlags points
 
+    rightPts :: Acc (Vector Point)
+    rightPts = propagateR headFlags points
+
+    -- afstand van elk punt tot lijn (p1,p2) van zijn segment
+    distances :: Acc (Vector Int)
+    distances =
+      zipWith3
+        (\p l r -> nonNormalizedDistance (T2 l r) p)
+        points
+        leftPts
+        rightPts
+
+    -- per segment: maximale afstand
+    maxDist :: Acc (Vector Int)
+    maxDist = segmentedScanl1 max headFlags distances
+
+    -- verste punten per segment (geen bestaande hullpunten)
+    isFarthest :: Acc (Vector Bool)
+    isFarthest =
+      zipWith3
+        (\d m h -> (d == m) && not h)
+        distances
+        maxDist
+        headFlags
+
+    -- nieuwe hullflags = oude hull + verste punten
+    newHeadFlags :: Acc (Vector Bool)
+    newHeadFlags =
+      zipWith (||) headFlags isFarthest
+
+    -- classificatie t.o.v. nieuwe lijnen (p1,p3) en (p3,p2)
+    leftOfLeft :: Acc (Vector Bool)
+    leftOfLeft =
+      zipWith3
+        (\p l r -> pointIsLeftOfLine (T2 l r) p)
+        points
+        leftPts
+        rightPts
+
+    rightOfRight :: Acc (Vector Bool)
+    rightOfRight =
+      zipWith3
+        (\p l r -> pointIsLeftOfLine (T2 r l) p)
+        points
+        leftPts
+        rightPts
+
+    -- bewaar hullpunten (oud+nieuw) en punten links/rechts van nieuwe lijnen
+    keep :: Acc (Vector Bool)
+    keep =
+      zipWith3
+        (\h a b -> h || a || b)
+        newHeadFlags
+        leftOfLeft
+        rightOfRight
+
+    flags'  :: Acc (Vector Bool)
+    flags'  = packAcc keep newHeadFlags
+
+    points' :: Acc (Vector Point)
+    points' = packAcc keep points
+  in
+  T2 flags' points'
+
+-- Helper functie voor partition implementatie -------------------------
+-- Filter a vector using a Boolean mask, keeping only elements where the flag is True.
+
+
+packAcc :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
+packAcc flags xs =
+  let
+    -- offsets[i] is compacte index voor elk True-element, count = totaal aantal True
+    T2 offsets count = boolOffsetsAndCount flags
+
+    total :: Exp Int
+    total = the count
+
+    -- dummy-element: wordt overal overschreven door permute
+    dummy :: Exp a
+    dummy = error "packAcc: unreachable dummy element"
+
+    -- index mapping: voor elk bron-index ix bepalen of en waar het element in de output komt
+    indexer :: Exp DIM1 -> Exp (Maybe DIM1)
+    indexer ix =
+      let
+        Z :. i = unlift ix :: Z :. Exp Int
+        keep   = flags   ! index1 i
+        off    = offsets ! index1 i
+      in
+      keep ? ( Just_   (index1 off)   -- schrijf naar compacte index
+             , Nothing_               -- sla dit element over
+             )
+
+    out :: Acc (Vector a)
+    out =
+      permute
+        (\_new old -> old)
+        (generate (index1 total) (\_ -> dummy))
+        indexer
+        xs
+  in
+  out
 
 -- The completed algorithm repeatedly partitions the points until there are
 -- no undecided points remaining. What remains is the convex hull.
