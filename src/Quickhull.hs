@@ -295,14 +295,14 @@ boolOffsetsAndCount flags =
 partition :: Acc SegmentedPoints -> Acc SegmentedPoints
 partition (T2 headFlags points) =
   let
-    -- linker en rechter hulpunten per segment
+    -- 1. Links- en rechtse hulpunten per segment
     leftPts  :: Acc (Vector Point)
     leftPts  = propagateL headFlags points
 
     rightPts :: Acc (Vector Point)
     rightPts = propagateR headFlags points
 
-    -- afstand van elk punt tot lijn (p1,p2) van zijn segment
+    -- 2. Afstanden tot lijn (p1,p2) en maximale afstand per segment
     distances :: Acc (Vector Int)
     distances =
       zipWith3
@@ -311,11 +311,10 @@ partition (T2 headFlags points) =
         leftPts
         rightPts
 
-    -- per segment: maximale afstand
     maxDist :: Acc (Vector Int)
     maxDist = segmentedScanl1 max headFlags distances
 
-    -- verste punten per segment (geen bestaande hullpunten)
+    -- 3. Verste punten per segment (exclusief bestaande hullpunten)
     isFarthest :: Acc (Vector Bool)
     isFarthest =
       zipWith3
@@ -324,12 +323,12 @@ partition (T2 headFlags points) =
         maxDist
         headFlags
 
-    -- nieuwe hullflags = oude hull + verste punten
+    -- 4. Nieuwe hull-flags = oude hullpunten + verste punten
     newHeadFlags :: Acc (Vector Bool)
     newHeadFlags =
       zipWith (||) headFlags isFarthest
 
-    -- classificatie t.o.v. nieuwe lijnen (p1,p3) en (p3,p2)
+    -- 5. Classificatie t.o.v. (p1,p3) en (p3,p2)
     leftOfLeft :: Acc (Vector Bool)
     leftOfLeft =
       zipWith3
@@ -346,61 +345,73 @@ partition (T2 headFlags points) =
         leftPts
         rightPts
 
-    -- bewaar hullpunten (oud+nieuw) en punten links/rechts van nieuwe lijnen
-    keep :: Acc (Vector Bool)
-    keep =
-      zipWith3
-        (\h a b -> h || a || b)
-        newHeadFlags
+    -- 6. Rol per punt binnen segment
+    role :: Acc (Vector Int)
+    role =
+      zipWith4
+        (\h f lo ro ->
+           h ? ( 0
+              , f  ? ( 2
+                      , lo ? ( 1
+                              , ro ? ( 3
+                                      , 1 )))))
+        headFlags
+        isFarthest
         leftOfLeft
         rightOfRight
 
-    flags'  :: Acc (Vector Bool)
-    flags'  = packAcc keep newHeadFlags
+    -- 7. Offsets voor linker punten
+    isLeft :: Acc (Vector Bool)
+    isLeft = map (== 1) role
 
+    T2 leftOffsets _leftCount = boolOffsetsAndCount isLeft
+
+    -- 8. Segment-startindex
+    segStart :: Acc (Vector Int)
+    segStart =
+      let
+        rawStart = generate (shape headFlags) $ \ix ->
+          let Z :. i = unlift ix :: Z :. Exp Int
+          in  headFlags ! index1 i ? (i, 0)
+      in
+      scanl1 max rawStart
+
+    -- 9. Oude lokale index binnen segment
+    localOld :: Acc (Vector Int)
+    localOld =
+      generate (shape points) $ \ix ->
+        let
+          Z :. i  = unlift ix :: Z :. Exp Int
+          start   = segStart ! index1 i
+        in
+        i - start
+
+    -- 10. Nieuwe lokale index binnen segment
+    newLocal :: Acc (Vector Int)
+    newLocal =
+      generate (shape points) $ \ix ->
+        let
+          Z :. i   = unlift ix :: Z :. Exp Int
+          r        = role        ! index1 i
+          old      = localOld    ! index1 i
+          lOff     = leftOffsets ! index1 i
+        in
+        r == 0 ? ( old
+                 , r == 2 ? ( 1 + lOff
+                            , r == 1 ? ( 1 + lOff
+                                       , old)))
+
+    -- 11. We gebruiken globalIndex voorlopig niet om te permuten
+    --     (herordening komt later / in quickhull)
     points' :: Acc (Vector Point)
-    points' = packAcc keep points
+    points' = points
+
+    flags' :: Acc (Vector Bool)
+    flags' = newHeadFlags
+
   in
   T2 flags' points'
 
--- Helper functie voor partition implementatie -------------------------
--- Filter a vector using a Boolean mask, keeping only elements where the flag is True.
-
-
-packAcc :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-packAcc flags xs =
-  let
-    -- offsets[i] is compacte index voor elk True-element, count = totaal aantal True
-    T2 offsets count = boolOffsetsAndCount flags
-
-    total :: Exp Int
-    total = the count
-
-    -- dummy-element: wordt overal overschreven door permute
-    dummy :: Exp a
-    dummy = error "packAcc: unreachable dummy element"
-
-    -- index mapping: voor elk bron-index ix bepalen of en waar het element in de output komt
-    indexer :: Exp DIM1 -> Exp (Maybe DIM1)
-    indexer ix =
-      let
-        Z :. i = unlift ix :: Z :. Exp Int
-        keep   = flags   ! index1 i
-        off    = offsets ! index1 i
-      in
-      keep ? ( Just_   (index1 off)   -- schrijf naar compacte index
-             , Nothing_               -- sla dit element over
-             )
-
-    out :: Acc (Vector a)
-    out =
-      permute
-        (\_new old -> old)
-        (generate (index1 total) (\_ -> dummy))
-        indexer
-        xs
-  in
-  out
 
 -- The completed algorithm repeatedly partitions the points until there are
 -- no undecided points remaining. What remains is the convex hull.
